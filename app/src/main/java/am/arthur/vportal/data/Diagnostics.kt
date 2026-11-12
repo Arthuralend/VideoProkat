@@ -3,69 +3,61 @@ package am.arthur.vportal.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.TimeUnit
+import org.json.JSONObject
+import java.net.InetAddress
 
-/**
- * Пробует обратиться к порталу разными способами передачи ключа и показывает сырые ответы.
- * Нужна, чтобы настроить подключение под конкретный API.
- */
+/** Проверка связи с медиатекой: DNS, затем каждый формат запроса. Ключ в отчёте скрыт. */
 object Diagnostics {
 
     data class Result(val title: String, val text: String)
 
-    private val plain = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
-
-    suspend fun run(portal: Portal): List<Result> = withContext(Dispatchers.IO) {
-        val base = portal.baseUrl
-        val key = portal.key
+    suspend fun run(portal: Portal, storage: Storage): List<Result> = withContext(Dispatchers.IO) {
+        val client = PortalClient(portal, storage)
         val out = mutableListOf<Result>()
+        val host = portal.baseUrl.toHttpUrlOrNull()?.host
+
         out += Result(
-            "Портал",
-            "Адрес: $base\nКлюч: ${key ?: "нет"}\nVPortal ${am.arthur.vportal.BuildConfig.VERSION_NAME}"
+            "Медиатека",
+            "Адрес API: ${portal.baseUrl}\nКлюч: ${portal.key?.let { "есть (${it.length} симв.)" } ?: "нет"}\n" +
+                "Запомненный формат: ${storage.proto ?: "—"}${if (storage.protoOk) " (подтверждён)" else ""}\n" +
+                "VPortal ${am.arthur.vportal.BuildConfig.VERSION_NAME}"
         )
 
-        fun withQuery(url: String, name: String, value: String): String =
-            url.toHttpUrlOrNull()?.newBuilder()?.addQueryParameter(name, value)?.build()?.toString() ?: url
-
-        val tries = mutableListOf<Triple<String, String, Map<String, String>>>()
-        tries += Triple("Без ключа", base, emptyMap())
-        if (key != null) {
-            tries += Triple("Параметр ?key=", withQuery(base, "key", key), emptyMap())
-            tries += Triple("Параметр ?api_key=", withQuery(base, "api_key", key), emptyMap())
-            tries += Triple("Параметр ?token=", withQuery(base, "token", key), emptyMap())
-            tries += Triple("Заголовок X-Api-Key", base, mapOf("X-Api-Key" to key))
-            tries += Triple("Заголовок Authorization: Bearer", base, mapOf("Authorization" to "Bearer $key"))
-            tries += Triple("Ключ в пути", base.trimEnd('/') + "/" + key, emptyMap())
-        }
-        val client = PortalClient(portal)
-        for (path in listOf("categories", "menu", "catalog", "genres", "movies", "films", "search?query=test")) {
-            tries += Triple("Все способы ключа: /$path", client.resolve(base, path), emptyMap())
+        out += try {
+            val ips = InetAddress.getAllByName(host).joinToString { it.hostAddress ?: "?" }
+            Result("DNS — OK", "$host → $ips")
+        } catch (e: Exception) {
+            Result("DNS — ошибка", "$host не находится: ${e.message}\nВозможно, адрес доступен только через VPN или у провайдера.")
         }
 
-        for ((title, url, headers) in tries) {
-            val usesClient = title.startsWith("Все способы")
+        for (p in PortalClient.PROTOS) {
             out += try {
-                val req = Request.Builder().url(url)
-                    .header("User-Agent", PortalClient.USER_AGENT)
-                    .header("Accept", "application/json, */*")
-                    .apply { headers.forEach { (k, v) -> header(k, v) } }
-                    .build()
-                (if (usesClient) client.http else plain).newCall(req).execute().use { r ->
-                    val body = r.body?.string().orEmpty()
-                    Result(
-                        "$title — HTTP ${r.code}",
-                        "$url\n${r.header("Content-Type") ?: ""} · ${body.length} байт\n\n" +
-                            body.take(1500).ifEmpty { "(пустой ответ)" }
-                    )
+                val t0 = System.currentTimeMillis()
+                val (code, text) = client.exchange(p, JSONObject().put("limit", 20))
+                val ms = System.currentTimeMillis() - t0
+                val j = Json.lenient(text)
+                val verdict = when {
+                    j == null -> "не JSON"
+                    j.optString("type") == "error" -> "ошибка портала"
+                    else -> "OK, элементов: ${j.optJSONArray("items")?.length() ?: 0}"
                 }
+                Result(
+                    "POST [$p] — HTTP $code · $verdict",
+                    "$ms мс · ${text.length} симв.\n\n" + client.mask(text.take(1500)).ifEmpty { "(пустой ответ)" }
+                )
             } catch (e: Exception) {
-                Result("$title — ошибка", "$url\n${e.javaClass.simpleName}: ${e.message}")
+                Result("POST [$p] — ошибка", "${e.javaClass.simpleName}: ${client.mask(e.message ?: "")}")
             }
+        }
+
+        out += try {
+            val req = Request.Builder().url(portal.baseUrl).header("User-Agent", PortalClient.USER_AGENT).build()
+            client.http.newCall(req).execute().use { r ->
+                Result("GET (для сравнения) — HTTP ${r.code}", client.mask(r.body?.string().orEmpty().take(400)))
+            }
+        } catch (e: Exception) {
+            Result("GET (для сравнения) — ошибка", "${e.javaClass.simpleName}: ${e.message}")
         }
         out
     }

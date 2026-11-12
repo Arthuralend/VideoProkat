@@ -59,13 +59,20 @@ import am.arthur.vportal.data.Load
 import am.arthur.vportal.data.Node
 import am.arthur.vportal.data.Page
 import am.arthur.vportal.data.PortalClient
+import am.arthur.vportal.data.RootInfo
 import am.arthur.vportal.data.Storage
 import am.arthur.vportal.data.load
 import kotlinx.coroutines.delay
 
-private enum class Kind { SEARCH, ROOT, FOLDER, CONTINUE, FAVORITES, PORTAL, DIAG }
+private enum class Kind { SEARCH, ROOT, FOLDER, FILTER, CONTINUE, FAVORITES, PORTAL, DIAG }
 
-private data class Section(val title: String, val icon: ImageVector, val kind: Kind, val node: Node? = null)
+private data class Section(
+    val title: String,
+    val icon: ImageVector,
+    val kind: Kind,
+    val node: Node? = null,
+    val items: List<Node> = emptyList(),
+)
 
 private fun iconFor(title: String): ImageVector {
     val t = title.lowercase()
@@ -91,21 +98,23 @@ fun HomeScreen(
 ) {
     var attempt by remember { mutableIntStateOf(0) }
     var root by remember(client) {
-        mutableStateOf<Load<Page>>(client.cached(client.portal.baseUrl)?.let { Load.Ok(it) } ?: Load.Loading)
+        mutableStateOf<Load<RootInfo>>(client.rootCache?.let { Load.Ok(it) } ?: Load.Loading)
     }
     LaunchedEffect(client, attempt) {
         if (root !is Load.Ok) root = load { client.root() }
     }
-    val rootPage = (root as? Load.Ok)?.value
+    val info = (root as? Load.Ok)?.value
 
-    val sections = remember(rootPage) {
+    val sections = remember(info) {
         buildList {
-            add(Section("Поиск", Icons.Filled.Search, Kind.SEARCH))
-            if (rootPage != null) {
-                val folders = rootPage.nodes.filter { it.isFolder }
-                val menuLike = folders.isNotEmpty() && folders.size == rootPage.nodes.size && folders.size <= 30
-                if (menuLike) folders.forEach { add(Section(it.title, iconFor(it.title), Kind.FOLDER, it)) }
-                else add(Section("Главная", Icons.Filled.Home, Kind.ROOT))
+            if (info == null || info.search) add(Section("Поиск", Icons.Filled.Search, Kind.SEARCH))
+            if (info != null) {
+                if (info.sections.isNotEmpty()) {
+                    info.sections.forEach { add(Section(it.title, iconFor(it.title), Kind.FOLDER, it)) }
+                } else {
+                    add(Section("Главная", Icons.Filled.Home, Kind.ROOT))
+                }
+                info.filters.forEach { (title, nodes) -> add(Section(title, Icons.Filled.List, Kind.FILTER, items = nodes)) }
             }
             add(Section("Продолжить", Icons.Filled.PlayArrow, Kind.CONTINUE))
             add(Section("Избранное", Icons.Filled.Favorite, Kind.FAVORITES))
@@ -137,9 +146,10 @@ fun HomeScreen(
                     val s = sections[sel]
                     key(sel, s.title) {
                         when (s.kind) {
-                            Kind.SEARCH -> SearchPane(client, r.value, onOpen)
-                            Kind.ROOT -> PagedGrid(client, r.value, onOpen, title = "Главная")
-                            Kind.FOLDER -> NodeGrid(client, s.node!!.folderUrl, s.node.inline, onOpen, title = s.title)
+                            Kind.SEARCH -> SearchPane(client, onOpen)
+                            Kind.ROOT -> PagedGrid(client, r.value.page, onOpen, title = "Главная")
+                            Kind.FOLDER -> NodeGrid(client, client.listRequest(s.node!!), null, onOpen, title = s.title)
+                            Kind.FILTER -> PagedGrid(client, Page(null, s.items), onOpen, title = s.title)
                             Kind.CONTINUE -> PagedGrid(
                                 client, Page(null, remember { storage.continueNodes() }), onOpen,
                                 title = "Продолжить просмотр",
@@ -238,7 +248,7 @@ private fun RailItem(
 }
 
 @Composable
-fun SearchPane(client: PortalClient, root: Page, onOpen: (Node) -> Unit) {
+fun SearchPane(client: PortalClient, onOpen: (Node) -> Unit) {
     var query by remember { mutableStateOf("") }
     var result by remember { mutableStateOf<Load<Page>?>(null) }
     var request by remember { mutableIntStateOf(0) }
@@ -246,7 +256,7 @@ fun SearchPane(client: PortalClient, root: Page, onOpen: (Node) -> Unit) {
     LaunchedEffect(request) {
         if (request > 0 && query.isNotBlank()) {
             result = Load.Loading
-            result = load { client.search(query.trim(), root) }
+            result = load { client.search(query.trim()) }
         }
     }
 
@@ -262,7 +272,7 @@ fun SearchPane(client: PortalClient, root: Page, onOpen: (Node) -> Unit) {
             null -> MessagePane("Введите название фильма, сериала или мультфильма")
             Load.Loading -> Loader()
             is Load.Err -> MessagePane(r.message)
-            is Load.Ok -> key(r) { PagedGrid(client, r.value, onOpen) }
+            is Load.Ok -> key(r) { PagedGrid(client, r.value, onOpen, emptyText = "Ничего не найдено") }
         }
     }
 }

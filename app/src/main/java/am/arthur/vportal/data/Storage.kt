@@ -13,21 +13,39 @@ class Storage(context: Context) {
             p.edit().putString("portal", v).apply()
         }
 
-    fun position(url: String): Long = p.getLong("pos:$url", 0L)
+    /** Формат запроса, на который портал ответил без ошибки. */
+    var proto: String?
+        get() = p.getString("proto", null)
+        set(v) {
+            p.edit().putString("proto", v).apply()
+        }
 
-    fun resetPosition(url: String) {
-        p.edit().remove("pos:$url").apply()
+    var protoOk: Boolean
+        get() = p.getBoolean("protoOk", false)
+        set(v) {
+            p.edit().putBoolean("protoOk", v).apply()
+        }
+
+    fun resetProto() {
+        p.edit().remove("proto").remove("protoOk").apply()
+    }
+
+    fun position(key: String): Long = p.getLong("pos:$key", 0L)
+
+    fun resetPosition(key: String) {
+        p.edit().remove("pos:$key").apply()
     }
 
     fun savePosition(node: Node, position: Long, duration: Long) {
-        val url = node.streamUrl ?: return
-        val finished = duration > 0 && position > duration - minOf(90_000L, duration / 10)
+        if (duration <= 0) return
+        val key = node.key
+        val finished = position > duration - minOf(90_000L, duration / 10)
         val editor = p.edit()
-        if (finished || position < 15_000) editor.remove("pos:$url") else editor.putLong("pos:$url", position)
+        if (finished || position < 15_000) editor.remove("pos:$key") else editor.putLong("pos:$key", position)
         editor.apply()
 
-        val list = continueNodes().filter { it.key != node.key }.toMutableList()
-        if (!finished && position >= 15_000) list.add(0, node.copy(inline = null))
+        val list = continueNodes().filter { it.key != key }.toMutableList()
+        if (!finished && position >= 15_000) list.add(0, node)
         writeList("continue", list.take(40))
     }
 
@@ -41,7 +59,7 @@ class Storage(context: Context) {
     fun toggleFavorite(node: Node): Boolean {
         val list = favorites().toMutableList()
         val existed = list.removeAll { it.key == node.key }
-        if (!existed) list.add(0, node.copy(inline = null))
+        if (!existed) list.add(0, node)
         writeList("favorites", list)
         return !existed
     }

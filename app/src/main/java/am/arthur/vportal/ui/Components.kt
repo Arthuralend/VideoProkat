@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -73,7 +74,7 @@ fun TvButton(
     val bg = when {
         focused -> Accent
         primary -> Accent.copy(alpha = 0.25f)
-        else -> Card
+        else -> CardBg
     }
     Row(
         modifier = modifier
@@ -144,7 +145,7 @@ fun PosterCard(node: Node, onClick: () -> Unit, modifier: Modifier = Modifier) {
                 .aspectRatio(2f / 3f)
                 .graphicsLayer { scaleX = scale; scaleY = scale }
                 .clip(RoundedCornerShape(12.dp))
-                .background(Card)
+                .background(CardBg)
                 .then(if (focused) Modifier.border(3.dp, Accent, RoundedCornerShape(12.dp)) else Modifier)
                 .onFocusChanged { focused = it.isFocused }
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClick() },
@@ -180,7 +181,11 @@ fun PosterContent(node: Node) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Icon(
-                if (node.isPlayable) Icons.Filled.PlayArrow else Icons.Filled.List,
+                when {
+                    node.isPlayable -> Icons.Filled.PlayArrow
+                    node.isSeries -> Icons.Filled.List
+                    else -> Icons.Filled.Star
+                },
                 contentDescription = null,
                 tint = Accent,
                 modifier = Modifier.size(40.dp),
@@ -202,20 +207,22 @@ fun PagedGrid(
     emptyText: String = "Здесь пока пусто",
 ) {
     val nodes = remember(page) { mutableStateListOf<Node>().apply { addAll(page.nodes) } }
-    var next by remember(page) { mutableStateOf(page.nextUrl) }
+    var next by remember(page) { mutableStateOf(page.nextRequest) }
     var loadingMore by remember(page) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val firstFocus = remember { FocusRequester() }
 
     fun loadMore() {
-        val url = next ?: return
+        val req = next ?: return
         if (loadingMore) return
         loadingMore = true
         scope.launch {
-            when (val r = load { client.page(url) }) {
+            when (val r = load { client.page(req) }) {
                 is Load.Ok -> {
-                    nodes.addAll(r.value.nodes)
-                    next = r.value.nextUrl?.takeIf { it != url && r.value.nodes.isNotEmpty() }
+                    val known = nodes.map { it.key }.toHashSet()
+                    val fresh = r.value.nodes.filter { it.key !in known }
+                    nodes.addAll(fresh)
+                    next = r.value.nextRequest?.takeIf { it != req && fresh.isNotEmpty() }
                 }
                 else -> next = null
             }
@@ -255,25 +262,25 @@ fun PagedGrid(
     }
 }
 
-/** Загружает раздел по ссылке (или берёт встроенный) и показывает сеткой. */
+/** Загружает список по запросу портала (или берёт готовый) и показывает сеткой. */
 @Composable
 fun NodeGrid(
     client: PortalClient,
-    url: String?,
+    request: String?,
     inline: Page?,
     onOpen: (Node) -> Unit,
     title: String? = null,
     autoFocus: Boolean = false,
 ) {
     var attempt by remember { mutableStateOf(0) }
-    var state by remember(url, inline) {
+    var state by remember(request, inline) {
         mutableStateOf<Load<Page>>(
-            inline?.let { Load.Ok(it) } ?: url?.let { client.cached(it) }?.let { Load.Ok(it) } ?: Load.Loading
+            inline?.let { Load.Ok(it) } ?: request?.let { client.cached(it) }?.let { Load.Ok(it) } ?: Load.Loading
         )
     }
-    LaunchedEffect(url, inline, attempt) {
+    LaunchedEffect(request, inline, attempt) {
         if (state !is Load.Ok) {
-            state = if (url != null) load { client.page(url) } else Load.Err("Пустой раздел")
+            state = if (request != null) load { client.page(request) } else Load.Err("Пустой раздел")
         }
     }
     when (val s = state) {

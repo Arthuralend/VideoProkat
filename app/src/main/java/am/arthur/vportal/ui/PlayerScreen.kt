@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,7 +36,9 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import am.arthur.vportal.data.Load
 import am.arthur.vportal.data.Node
+import am.arthur.vportal.data.load
 import am.arthur.vportal.data.PortalClient
 import am.arthur.vportal.data.Storage
 
@@ -64,12 +67,23 @@ class TvPlayerView(context: Context) : PlayerView(context) {
 
 @OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(client: PortalClient, storage: Storage, node: Node) {
-    val url = node.streamUrl ?: return
+fun PlayerScreen(client: PortalClient, storage: Storage, node: Node, url: String?) {
     val context = LocalContext.current
     var error by remember { mutableStateOf<String?>(null) }
+    var resolved by remember(node, url) { mutableStateOf(url) }
 
-    val player = remember(url) {
+    // Ссылки нет — спрашиваем у портала (cmd:"flick").
+    LaunchedEffect(node, url) {
+        if (resolved == null) {
+            when (val r = load { client.streamUrl(node) }) {
+                is Load.Ok -> resolved = r.value
+                is Load.Err -> error = r.message
+                Load.Loading -> Unit
+            }
+        }
+    }
+
+    val player = remember(node) {
         val dataSource = OkHttpDataSource.Factory(client.http).setUserAgent(PortalClient.USER_AGENT)
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
@@ -89,20 +103,24 @@ fun PlayerScreen(client: PortalClient, storage: Storage, node: Node) {
             }
         }
         player.addListener(listener)
-        val item = MediaItem.Builder()
-            .setUri(url)
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(node.title).build())
-            .build()
-        player.setMediaItem(item)
-        val start = storage.position(url)
-        if (start > 0) player.seekTo(start)
-        player.prepare()
-        player.playWhenReady = true
         onDispose {
             storage.savePosition(node, player.currentPosition, player.duration)
             player.removeListener(listener)
             player.release()
         }
+    }
+
+    LaunchedEffect(resolved) {
+        val u = resolved ?: return@LaunchedEffect
+        val item = MediaItem.Builder()
+            .setUri(u)
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(node.title).build())
+            .build()
+        player.setMediaItem(item)
+        val start = storage.position(node.key)
+        if (start > 0) player.seekTo(start)
+        player.prepare()
+        player.playWhenReady = true
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -134,6 +152,7 @@ fun PlayerScreen(client: PortalClient, storage: Storage, node: Node) {
             },
             modifier = Modifier.fillMaxSize(),
         )
+        if (resolved == null && error == null) Loader()
         error?.let {
             Text(
                 it,

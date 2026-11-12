@@ -3,6 +3,7 @@ package am.arthur.vportal.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -17,40 +18,41 @@ import am.arthur.vportal.data.Storage
 sealed interface Screen {
     data class Browse(val node: Node) : Screen
     data class Details(val node: Node) : Screen
-    data class Player(val node: Node) : Screen
+    data class Player(val node: Node, val url: String?) : Screen
 }
 
 @Composable
 fun VPortalApp(storage: Storage) {
     var portalRaw by rememberSaveable { mutableStateOf(storage.lastPortal) }
     var diagnostics by remember { mutableStateOf<String?>(null) }
-    val client = remember(portalRaw) { portalRaw?.let { PortalConfig.parse(it) }?.let { PortalClient(it) } }
+    val client = remember(portalRaw) { portalRaw?.let { PortalConfig.parse(it) }?.let { PortalClient(it, storage) } }
     val stack = remember(client) { mutableStateListOf<Screen>() }
     var homeSection by remember(client) { mutableIntStateOf(-1) }
 
     val open: (Node) -> Unit = { n ->
         when {
-            n.isPlayable -> stack.add(Screen.Details(n))
             n.isFolder -> stack.add(Screen.Browse(n))
+            else -> stack.add(Screen.Details(n))
         }
     }
 
     val diag = diagnostics
     if (diag != null) {
         BackHandler { diagnostics = null }
-        DiagnosticsScreen(diag)
+        DiagnosticsScreen(diag, storage)
         return
     }
 
     if (client == null) {
         ConnectScreen(
-            initial = PortalConfig.display(storage.lastPortal),
+            initial = storage.lastPortal ?: PortalConfig.DEFAULT,
             onConnect = { input ->
-                val resolved = PortalConfig.resolve(input)
-                storage.lastPortal = resolved
-                portalRaw = resolved
+                val value = PortalConfig.normalize(input)
+                storage.resetProto()
+                storage.lastPortal = value
+                portalRaw = value
             },
-            onDiagnostics = { diagnostics = PortalConfig.resolve(it) },
+            onDiagnostics = { diagnostics = PortalConfig.normalize(it) },
         )
         return
     }
@@ -71,11 +73,19 @@ fun VPortalApp(storage: Storage) {
             },
             onDiagnostics = { diagnostics = client.portal.raw },
         )
-        is Screen.Browse -> NodeGrid(
-            client, current.node.folderUrl, current.node.inline, open,
-            title = current.node.title, autoFocus = true,
-        )
-        is Screen.Details -> DetailsScreen(storage, current.node, onPlay = { stack.add(Screen.Player(it)) })
-        is Screen.Player -> PlayerScreen(client, storage, current.node)
+        is Screen.Browse -> key(current) {
+            NodeGrid(
+                client, client.listRequest(current.node), null, open,
+                title = current.node.title, autoFocus = true,
+            )
+        }
+        is Screen.Details -> key(current) {
+            DetailsScreen(
+                client, storage, current.node,
+                onPlay = { n, u -> stack.add(Screen.Player(n, u)) },
+                onOpen = open,
+            )
+        }
+        is Screen.Player -> key(current) { PlayerScreen(client, storage, current.node, current.url) }
     }
 }

@@ -34,13 +34,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import am.arthur.vportal.data.Diagnostics
 import am.arthur.vportal.data.PortalConfig
+import am.arthur.vportal.data.Storage
 
 @Composable
-fun DiagnosticsScreen(raw: String) {
+fun DiagnosticsScreen(raw: String, storage: Storage) {
     val results by produceState<List<Diagnostics.Result>?>(null, raw) {
         val portal = PortalConfig.parse(raw)
         value = if (portal == null) listOf(Diagnostics.Result("Ошибка", "Не удалось разобрать адрес: $raw"))
-        else Diagnostics.run(portal)
+        else Diagnostics.run(portal, storage)
     }
     Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 32.dp)) {
         Text("Диагностика портала", fontSize = 30.sp, fontWeight = FontWeight.Bold)
@@ -76,13 +77,13 @@ private fun DiagCard(r: Diagnostics.Result, modifier: Modifier) {
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Card)
+            .background(CardBg)
             .then(if (focused) Modifier.border(2.dp, Accent, RoundedCornerShape(12.dp)) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .focusable()
             .padding(18.dp)
     ) {
-        Text(r.title, color = if (r.title.contains("200")) Accent else Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(r.title, color = if (r.title.contains("OK")) Accent else Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(r.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Color(0xFFCDD1D8), lineHeight = 18.sp)
     }

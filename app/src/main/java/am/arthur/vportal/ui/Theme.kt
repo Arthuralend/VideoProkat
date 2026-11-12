@@ -9,7 +9,7 @@ import androidx.compose.ui.graphics.Color
 val Accent = Color(0xFFFF7A1A)
 val Bg = Color(0xFF0F1014)
 val Panel = Color(0xFF16181D)
-val Card = Color(0xFF1F2128)
+val CardBg = Color(0xFF1F2128)
 val TextDim = Color(0xFF9AA0AA)
 val ErrorRed = Color(0xFFFF5A5A)
 
@@ -20,7 +20,7 @@ fun VPortalTheme(content: @Composable () -> Unit) {
             primary = Accent,
             onPrimary = Color.Black,
             background = Bg,
-            surface = Card,
+            surface = CardBg,
             onBackground = Color.White,
             onSurface = Color.White,
         )

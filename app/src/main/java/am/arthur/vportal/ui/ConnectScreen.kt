@@ -35,7 +35,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import am.arthur.vportal.data.PortalConfig
-import kotlinx.coroutines.delay
 
 @Composable
 fun ConnectScreen(
@@ -49,20 +48,13 @@ fun ConnectScreen(
 
     fun submit() {
         if (PortalConfig.parse(text) == null) {
-            error = "Введите адрес портала (http://…), строку portal::[key:…]… или код"
+            error = "Вставьте строку вида portal::[key:…]http://…/api/v1/"
         } else {
             error = null
             onConnect(text)
         }
     }
 
-    // Набрали 22184 — подключаемся сразу, без нажатия кнопки.
-    LaunchedEffect(text) {
-        if (text.trim() == PortalConfig.SHORT_CODE) {
-            delay(400)
-            onConnect(text)
-        }
-    }
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
 
     Column(
@@ -87,8 +79,8 @@ fun ConnectScreen(
             value = text,
             onValueChange = { text = it; error = null },
             singleLine = true,
-            label = { Text("Адрес портала или код") },
-            placeholder = { Text("Например: ${PortalConfig.SHORT_CODE}") },
+            label = { Text("Строка подключения к медиатеке") },
+            placeholder = { Text("portal::[key:…]http://…/api/v1/") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { submit() }, onDone = { submit() }),
             colors = OutlinedTextFieldDefaults.colors(
@@ -98,7 +90,7 @@ fun ConnectScreen(
                 unfocusedTextColor = Color.White,
                 focusedTextColor = Color.White,
             ),
-            modifier = Modifier.width(620.dp).focusRequester(fieldFocus),
+            modifier = Modifier.width(820.dp),
         )
         if (error != null) {
             Spacer(Modifier.height(10.dp))
@@ -106,15 +98,15 @@ fun ConnectScreen(
         }
         Spacer(Modifier.height(24.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            TvButton("Подключить", ::submit, icon = Icons.Filled.PlayArrow, primary = true)
+            TvButton("Подключить", ::submit, icon = Icons.Filled.PlayArrow, primary = true, modifier = Modifier.focusRequester(fieldFocus))
             TvButton("Диагностика", {
                 if (PortalConfig.parse(text) != null) onDiagnostics(text)
-                else error = "Сначала введите адрес портала или код"
+                else error = "Сначала вставьте строку подключения"
             }, icon = Icons.Filled.Info)
         }
         Spacer(Modifier.height(28.dp))
         Text(
-            "Наберите ${PortalConfig.SHORT_CODE} — подключение произойдёт автоматически",
+            "Вставьте строку из личного кабинета (без кавычек) и нажмите «Подключить»",
             color = TextDim,
             fontSize = 15.sp,
         )
