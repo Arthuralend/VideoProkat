@@ -1,0 +1,268 @@
+package am.arthur.vportal.ui
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import am.arthur.vportal.data.Load
+import am.arthur.vportal.data.Node
+import am.arthur.vportal.data.Page
+import am.arthur.vportal.data.PortalClient
+import am.arthur.vportal.data.Storage
+import am.arthur.vportal.data.load
+import kotlinx.coroutines.delay
+
+private enum class Kind { SEARCH, ROOT, FOLDER, CONTINUE, FAVORITES, PORTAL, DIAG }
+
+private data class Section(val title: String, val icon: ImageVector, val kind: Kind, val node: Node? = null)
+
+private fun iconFor(title: String): ImageVector {
+    val t = title.lowercase()
+    return when {
+        "мульт" in t || "дет" in t -> Icons.Filled.Face
+        "сериал" in t -> Icons.Filled.List
+        "фильм" in t || "кино" in t -> Icons.Filled.PlayArrow
+        "шоу" in t || "тв" in t || "передач" in t -> Icons.Filled.DateRange
+        "позн" in t || "док" in t || "науч" in t -> Icons.Filled.Info
+        else -> Icons.Filled.Star
+    }
+}
+
+@Composable
+fun HomeScreen(
+    client: PortalClient,
+    storage: Storage,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    onOpen: (Node) -> Unit,
+    onChangePortal: () -> Unit,
+    onDiagnostics: () -> Unit,
+) {
+    var attempt by remember { mutableIntStateOf(0) }
+    var root by remember(client) {
+        mutableStateOf<Load<Page>>(client.cached(client.portal.baseUrl)?.let { Load.Ok(it) } ?: Load.Loading)
+    }
+    LaunchedEffect(client, attempt) {
+        if (root !is Load.Ok) root = load { client.root() }
+    }
+    val rootPage = (root as? Load.Ok)?.value
+
+    val sections = remember(rootPage) {
+        buildList {
+            add(Section("Поиск", Icons.Filled.Search, Kind.SEARCH))
+            if (rootPage != null) {
+                val folders = rootPage.nodes.filter { it.isFolder }
+                val menuLike = folders.isNotEmpty() && folders.size == rootPage.nodes.size && folders.size <= 30
+                if (menuLike) folders.forEach { add(Section(it.title, iconFor(it.title), Kind.FOLDER, it)) }
+                else add(Section("Главная", Icons.Filled.Home, Kind.ROOT))
+            }
+            add(Section("Продолжить", Icons.Filled.PlayArrow, Kind.CONTINUE))
+            add(Section("Избранное", Icons.Filled.Favorite, Kind.FAVORITES))
+            add(Section("Сменить портал", Icons.Filled.Refresh, Kind.PORTAL))
+            add(Section("Диагностика", Icons.Filled.Settings, Kind.DIAG))
+        }
+    }
+    val defaultIndex = sections.indexOfFirst { it.kind == Kind.ROOT || it.kind == Kind.FOLDER }.takeIf { it >= 0 } ?: 0
+    val sel = if (selected in sections.indices && sections[selected].kind !in setOf(Kind.PORTAL, Kind.DIAG)) selected else defaultIndex
+
+    Row(Modifier.fillMaxSize()) {
+        Rail(sections, sel) { i ->
+            when (sections[i].kind) {
+                Kind.PORTAL -> onChangePortal()
+                Kind.DIAG -> onDiagnostics()
+                else -> onSelect(i)
+            }
+        }
+        Box(Modifier.weight(1f).fillMaxHeight()) {
+            when (val r = root) {
+                Load.Loading -> Loader()
+                is Load.Err -> ErrorPane(
+                    r.message,
+                    onRetry = { client.clearCache(); root = Load.Loading; attempt++ },
+                    onDiagnostics = onDiagnostics,
+                    onChangePortal = onChangePortal,
+                )
+                is Load.Ok -> {
+                    val s = sections[sel]
+                    key(sel, s.title) {
+                        when (s.kind) {
+                            Kind.SEARCH -> SearchPane(client, r.value, onOpen)
+                            Kind.ROOT -> PagedGrid(client, r.value, onOpen, title = "Главная")
+                            Kind.FOLDER -> NodeGrid(client, s.node!!.folderUrl, s.node.inline, onOpen, title = s.title)
+                            Kind.CONTINUE -> PagedGrid(
+                                client, Page(null, remember { storage.continueNodes() }), onOpen,
+                                title = "Продолжить просмотр",
+                                emptyText = "Здесь появится то, что вы начали смотреть",
+                            )
+                            Kind.FAVORITES -> PagedGrid(
+                                client, Page(null, remember { storage.favorites() }), onOpen,
+                                title = "Избранное",
+                                emptyText = "Добавляйте фильмы в избранное кнопкой на странице фильма",
+                            )
+                            else -> Unit
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Rail(sections: List<Section>, selected: Int, onClick: (Int) -> Unit) {
+    val fr = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { fr.requestFocus() } }
+    Column(
+        Modifier.width(250.dp).fillMaxHeight().background(Panel).padding(top = 28.dp)
+    ) {
+        Row(Modifier.padding(start = 28.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("V", color = Accent, fontSize = 30.sp, fontWeight = FontWeight.Black)
+            Text("Portal", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        }
+        LazyColumn(
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            itemsIndexed(sections, key = { i, s -> "$i|${s.title}" }) { i, s ->
+                val auto = s.kind != Kind.PORTAL && s.kind != Kind.DIAG
+                RailItem(
+                    s.title, s.icon, i == selected,
+                    onClick = { onClick(i) },
+                    onFocusSelect = if (auto) ({ if (i != selected) onClick(i) }) else null,
+                    modifier = if (i == selected) Modifier.focusRequester(fr) else Modifier,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RailItem(
+    title: String,
+    icon: ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onFocusSelect: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "rail")
+    // Наведение пультом на пункт меню открывает раздел (с небольшой задержкой).
+    LaunchedEffect(focused) {
+        if (focused && onFocusSelect != null) {
+            delay(450)
+            onFocusSelect()
+        }
+    }
+    val bg = when {
+        focused -> Accent
+        selected -> Accent.copy(alpha = 0.18f)
+        else -> Color.Transparent
+    }
+    val fg = when {
+        focused -> Color.Black
+        selected -> Accent
+        else -> Color.White
+    }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(12.dp))
+            .background(bg)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClick() }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(14.dp))
+        Text(
+            title, color = fg, fontSize = 17.sp,
+            fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+fun SearchPane(client: PortalClient, root: Page, onOpen: (Node) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    var result by remember { mutableStateOf<Load<Page>?>(null) }
+    var request by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(request) {
+        if (request > 0 && query.isNotBlank()) {
+            result = Load.Loading
+            result = load { client.search(query.trim(), root) }
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            "Поиск", fontSize = 28.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 40.dp, top = 28.dp),
+        )
+        Spacer(Modifier.height(16.dp))
+        SearchField(query, { query = it }, onSearch = { request++ }, modifier = Modifier.padding(horizontal = 40.dp))
+        Spacer(Modifier.height(8.dp))
+        when (val r = result) {
+            null -> MessagePane("Введите название фильма, сериала или мультфильма")
+            Load.Loading -> Loader()
+            is Load.Err -> MessagePane(r.message)
+            is Load.Ok -> key(r) { PagedGrid(client, r.value, onOpen) }
+        }
+    }
+}
