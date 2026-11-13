@@ -8,6 +8,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -84,7 +87,7 @@ fun SearchField(value: String, onChange: (String) -> Unit, onSearch: () -> Unit,
             focusedTextColor = Color.White,
             unfocusedTextColor = Color.White,
         ),
-        modifier = modifier.width(560.dp),
+        modifier = modifier.fillMaxWidth().widthIn(max = 560.dp),
     )
 }
 
@@ -100,6 +103,7 @@ fun formatTime(ms: Long): String {
  * Карточка фильма или сериала.
  * onPlay(элемент, ссылка) — ссылка может быть null, тогда плеер сам запросит её у портала.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailsScreen(
     client: PortalClient,
@@ -123,7 +127,70 @@ fun DetailsScreen(
     val canPlay = card?.url != null || (card == null && node.isPlayable)
     val episodes = card?.items.orEmpty()
 
-    LaunchedEffect(state) { runCatching { firstFocus.requestFocus() } }
+    val tv = LocalIsTv.current
+    val wide = isWideLayout()
+    LaunchedEffect(state) { if (tv) runCatching { firstFocus.requestFocus() } }
+
+    val actions: @Composable () -> Unit = {
+        Spacer(Modifier.height(if (wide) 26.dp else 16.dp))
+
+        when (val s = state) {
+            Load.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(color = Accent, modifier = Modifier.size(28.dp))
+                Spacer(Modifier.width(14.dp))
+                Text("Загрузка…", color = TextDim, fontSize = 17.sp)
+            }
+            is Load.Err -> Column {
+                Text(s.message, color = ErrorRed, fontSize = 16.sp, maxLines = 4)
+                Spacer(Modifier.height(12.dp))
+                TvButton(
+                    "Повторить", { attempt++ }, icon = Icons.Filled.Refresh, primary = true,
+                    modifier = Modifier.focusRequester(firstFocus),
+                )
+            }
+            is Load.Ok -> FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (canPlay) {
+                    TvButton(
+                        if (position > 0) "Продолжить с ${formatTime(position)}" else "Смотреть",
+                        onClick = { onPlay(shown, card?.url) },
+                        icon = Icons.Filled.PlayArrow,
+                        primary = true,
+                        modifier = Modifier.focusRequester(firstFocus),
+                    )
+                    if (position > 0) {
+                        TvButton("С начала", onClick = {
+                            storage.resetPosition(shown.key); onPlay(shown, card?.url)
+                        }, icon = Icons.Filled.Refresh)
+                    }
+                    card?.variants?.take(4)?.forEach { (q, u) ->
+                        TvButton(q, onClick = { onPlay(shown, u) })
+                    }
+                }
+                TvButton(
+                    if (favorite) "В избранном" else "В избранное",
+                    onClick = { favorite = storage.toggleFavorite(node) },
+                    icon = if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    modifier = if (canPlay) Modifier else Modifier.focusRequester(firstFocus),
+                )
+            }
+        }
+
+        if (shown.description != null) {
+            Spacer(Modifier.height(26.dp))
+            Text(
+                shown.description, color = Color(0xFFD5D8DE),
+                fontSize = if (wide) 18.sp else 15.sp, lineHeight = if (wide) 27.sp else 22.sp,
+                maxLines = if (wide) 9 else 30, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (card != null && !canPlay && episodes.isEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text("Портал не вернул видео для этого элемента", color = TextDim, fontSize = 16.sp)
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         if (shown.poster != null) {
@@ -140,83 +207,34 @@ fun DetailsScreen(
             )
         )
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(250.dp),
-            contentPadding = PaddingValues(horizontal = 56.dp, vertical = 44.dp),
+            columns = GridCells.Adaptive(if (wide) 250.dp else 160.dp),
+            contentPadding = if (wide) PaddingValues(horizontal = 56.dp, vertical = 44.dp)
+            else PaddingValues(horizontal = 16.dp, vertical = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Row(horizontalArrangement = Arrangement.spacedBy(44.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(if (wide) 44.dp else 16.dp)) {
                     Box(
-                        Modifier.width(250.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(16.dp)).background(CardBg)
+                        Modifier.width(if (wide) 250.dp else 120.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(16.dp)).background(CardBg)
                     ) { PosterContent(shown) }
 
                     Column(Modifier.weight(1f)) {
                         Text(
-                            shown.title, fontSize = 36.sp, fontWeight = FontWeight.Bold,
-                            maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            shown.title, fontSize = if (wide) 36.sp else 22.sp, fontWeight = FontWeight.Bold,
+                            maxLines = if (wide) 2 else 4, overflow = TextOverflow.Ellipsis,
                         )
                         if (shown.meta != null) {
                             Spacer(Modifier.height(10.dp))
-                            Text(shown.meta, color = Accent, fontSize = 17.sp, maxLines = 2)
+                            Text(shown.meta, color = Accent, fontSize = if (wide) 17.sp else 14.sp, maxLines = 3)
                         }
-                        Spacer(Modifier.height(26.dp))
-
-                        when (val s = state) {
-                            Load.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(color = Accent, modifier = Modifier.size(28.dp))
-                                Spacer(Modifier.width(14.dp))
-                                Text("Загрузка…", color = TextDim, fontSize = 17.sp)
-                            }
-                            is Load.Err -> Column {
-                                Text(s.message, color = ErrorRed, fontSize = 16.sp, maxLines = 4)
-                                Spacer(Modifier.height(12.dp))
-                                TvButton(
-                                    "Повторить", { attempt++ }, icon = Icons.Filled.Refresh, primary = true,
-                                    modifier = Modifier.focusRequester(firstFocus),
-                                )
-                            }
-                            is Load.Ok -> Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                if (canPlay) {
-                                    TvButton(
-                                        if (position > 0) "Продолжить с ${formatTime(position)}" else "Смотреть",
-                                        onClick = { onPlay(shown, card?.url) },
-                                        icon = Icons.Filled.PlayArrow,
-                                        primary = true,
-                                        modifier = Modifier.focusRequester(firstFocus),
-                                    )
-                                    if (position > 0) {
-                                        TvButton("С начала", onClick = {
-                                            storage.resetPosition(shown.key); onPlay(shown, card?.url)
-                                        }, icon = Icons.Filled.Refresh)
-                                    }
-                                    card?.variants?.take(4)?.forEach { (q, u) ->
-                                        TvButton(q, onClick = { onPlay(shown, u) })
-                                    }
-                                }
-                                TvButton(
-                                    if (favorite) "В избранном" else "В избранное",
-                                    onClick = { favorite = storage.toggleFavorite(node) },
-                                    icon = if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                                    modifier = if (canPlay) Modifier else Modifier.focusRequester(firstFocus),
-                                )
-                            }
-                        }
-
-                        if (shown.description != null) {
-                            Spacer(Modifier.height(26.dp))
-                            Text(
-                                shown.description, color = Color(0xFFD5D8DE), fontSize = 18.sp, lineHeight = 27.sp,
-                                maxLines = 9, overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        if (card != null && !canPlay && episodes.isEmpty()) {
-                            Spacer(Modifier.height(16.dp))
-                            Text("Портал не вернул видео для этого элемента", color = TextDim, fontSize = 16.sp)
-                        }
+                        if (wide) actions()
                     }
                 }
+            }
+            if (!wide) {
+                item(span = { GridItemSpan(maxLineSpan) }) { Column { actions() } }
             }
 
             if (episodes.isNotEmpty()) {

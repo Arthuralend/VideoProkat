@@ -10,6 +10,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -84,21 +89,23 @@ fun ConnectScreen(
     }
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
 
+    val compact = LocalConfiguration.current.screenWidthDp < 600
     Column(
-        Modifier.fillMaxSize().padding(48.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(if (compact) 20.dp else 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        AppTitle(iconSize = 110, fontSize = 56)
+        if (compact) Spacer(Modifier.height(40.dp))
+        AppTitle(iconSize = if (compact) 60 else 110, fontSize = if (compact) 30 else 56)
         Spacer(Modifier.height(12.dp))
         Text(
             "Огромный выбор фильмов, сериалов, мультфильмов для детей и взрослых,\n" +
                 "тв-шоу и познавательных программ",
             color = TextDim,
-            fontSize = 18.sp,
+            fontSize = if (compact) 15.sp else 18.sp,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(36.dp))
+        Spacer(Modifier.height(if (compact) 24.dp else 36.dp))
         OutlinedTextField(
             value = text,
             onValueChange = { text = it; error = null },
@@ -115,14 +122,14 @@ fun ConnectScreen(
                 focusedTextColor = Color.White,
             ),
             textStyle = TextStyle(fontSize = 26.sp, textAlign = TextAlign.Center),
-            modifier = Modifier.width(360.dp).focusRequester(fieldFocus),
+            modifier = Modifier.fillMaxWidth().widthIn(max = 360.dp).focusRequester(fieldFocus),
         )
         if (error != null) {
             Spacer(Modifier.height(10.dp))
             Text(error!!, color = ErrorRed, fontSize = 15.sp)
         }
         Spacer(Modifier.height(24.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TvButton("Подключить", ::submit, icon = Icons.Filled.PlayArrow, primary = true)
             TvButton("Диагностика", {
                 if (PortalConfig.parse(text) != null) onDiagnostics(text)

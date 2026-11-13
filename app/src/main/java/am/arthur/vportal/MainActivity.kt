@@ -7,13 +7,17 @@ import coil.memory.MemoryCache
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import am.arthur.vportal.data.Storage
+import am.arthur.vportal.ui.LocalIsTv
 import am.arthur.vportal.ui.VPortalApp
+import am.arthur.vportal.ui.detectTv
+import androidx.compose.runtime.CompositionLocalProvider
 import am.arthur.vportal.ui.VPortalTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val storage = Storage(applicationContext)
+        val isTv = detectTv(this)
         // Кэш постеров в памяти — не больше 15% доступной приложению памяти.
         Coil.setImageLoader(
             ImageLoader.Builder(applicationContext)
@@ -21,8 +25,10 @@ class MainActivity : ComponentActivity() {
                 .build()
         )
         setContent {
-            VPortalTheme {
-                VPortalApp(storage)
+            CompositionLocalProvider(LocalIsTv provides isTv) {
+                VPortalTheme {
+                    VPortalApp(storage)
+                }
             }
         }
     }

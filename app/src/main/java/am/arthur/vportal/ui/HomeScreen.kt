@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -125,15 +126,14 @@ fun HomeScreen(
     val defaultIndex = sections.indexOfFirst { it.kind == Kind.ROOT || it.kind == Kind.FOLDER }.takeIf { it >= 0 } ?: 0
     val sel = if (selected in sections.indices && sections[selected].kind !in setOf(Kind.PORTAL, Kind.DIAG)) selected else defaultIndex
 
-    Row(Modifier.fillMaxSize()) {
-        Rail(sections, sel) { i ->
-            when (sections[i].kind) {
-                Kind.PORTAL -> onChangePortal()
-                Kind.DIAG -> onDiagnostics()
-                else -> onSelect(i)
-            }
+    val onPick: (Int) -> Unit = { i ->
+        when (sections[i].kind) {
+            Kind.PORTAL -> onChangePortal()
+            Kind.DIAG -> onDiagnostics()
+            else -> onSelect(i)
         }
-        Box(Modifier.weight(1f).fillMaxHeight()) {
+    }
+    val content: @Composable () -> Unit = {
             when (val r = root) {
                 Load.Loading -> Loader()
                 is Load.Err -> ErrorPane(
@@ -165,16 +165,56 @@ fun HomeScreen(
                     }
                 }
             }
+    }
+
+    if (isWideLayout()) {
+        Row(Modifier.fillMaxSize()) {
+            Rail(sections, sel, onPick)
+            Box(Modifier.weight(1f).fillMaxHeight()) { content() }
         }
+    } else {
+        // Телефон вертикально: название сверху, разделы — прокручиваемые вкладки.
+        Column(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxWidth().background(Panel).padding(top = 10.dp, bottom = 8.dp)) {
+                AppTitle(iconSize = 32, fontSize = 20, modifier = Modifier.padding(start = 14.dp, bottom = 8.dp))
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    itemsIndexed(sections, key = { i, s -> "$i|${s.title}" }) { i, s ->
+                        TabChip(s.title, s.icon, i == sel) { onPick(i) }
+                    }
+                }
+            }
+            Box(Modifier.fillMaxWidth().weight(1f)) { content() }
+        }
+    }
+}
+
+@Composable
+private fun TabChip(title: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) Accent else CardBg)
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val fg = if (selected) Color.Black else Color.White
+        Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(title, color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
 @Composable
 private fun Rail(sections: List<Section>, selected: Int, onClick: (Int) -> Unit) {
     val fr = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { fr.requestFocus() } }
+    val tv = LocalIsTv.current
+    LaunchedEffect(Unit) { if (tv) runCatching { fr.requestFocus() } }
     Column(
-        Modifier.width(250.dp).fillMaxHeight().background(Panel).padding(top = 28.dp)
+        Modifier.width(230.dp).fillMaxHeight().background(Panel).padding(top = 24.dp)
     ) {
         AppTitle(iconSize = 40, fontSize = 21, modifier = Modifier.padding(start = 20.dp, bottom = 20.dp))
         LazyColumn(
@@ -183,7 +223,7 @@ private fun Rail(sections: List<Section>, selected: Int, onClick: (Int) -> Unit)
             modifier = Modifier.fillMaxWidth(),
         ) {
             itemsIndexed(sections, key = { i, s -> "$i|${s.title}" }) { i, s ->
-                val auto = s.kind != Kind.PORTAL && s.kind != Kind.DIAG
+                val auto = tv && s.kind != Kind.PORTAL && s.kind != Kind.DIAG
                 RailItem(
                     s.title, s.icon, i == selected,
                     onClick = { onClick(i) },
@@ -257,13 +297,14 @@ fun SearchPane(client: PortalClient, onOpen: (Node) -> Unit) {
         }
     }
 
+    val pad = if (isWideLayout()) 36.dp else 16.dp
     Column(Modifier.fillMaxSize()) {
         Text(
-            "Поиск", fontSize = 28.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 40.dp, top = 28.dp),
+            "Поиск", fontSize = 24.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = pad, top = 20.dp),
         )
-        Spacer(Modifier.height(16.dp))
-        SearchField(query, { query = it }, onSearch = { request++ }, modifier = Modifier.padding(horizontal = 40.dp))
+        Spacer(Modifier.height(12.dp))
+        SearchField(query, { query = it }, onSearch = { request++ }, modifier = Modifier.padding(horizontal = pad))
         Spacer(Modifier.height(8.dp))
         when (val r = result) {
             null -> MessagePane("Введите название фильма, сериала или мультфильма")

@@ -7,7 +7,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -50,6 +53,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import am.arthur.vportal.data.Load
@@ -107,6 +111,7 @@ fun MessagePane(text: String, modifier: Modifier = Modifier.fillMaxSize()) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ErrorPane(
     message: String,
@@ -115,9 +120,10 @@ fun ErrorPane(
     onChangePortal: (() -> Unit)? = null,
 ) {
     val fr = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { fr.requestFocus() } }
+    val tv = LocalIsTv.current
+    LaunchedEffect(Unit) { if (tv) runCatching { fr.requestFocus() } }
     Column(
-        Modifier.fillMaxSize().padding(40.dp),
+        Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -125,7 +131,10 @@ fun ErrorPane(
         Spacer(Modifier.height(10.dp))
         Text(message, color = TextDim, fontSize = 16.sp, textAlign = TextAlign.Center, maxLines = 6)
         Spacer(Modifier.height(24.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             TvButton("Повторить", onRetry, Modifier.focusRequester(fr), primary = true)
             if (onDiagnostics != null) TvButton("Диагностика", onDiagnostics)
             if (onChangePortal != null) TvButton("Сменить портал", onChangePortal)
@@ -157,8 +166,10 @@ fun PosterCard(node: Node, onClick: () -> Unit, modifier: Modifier = Modifier) {
         Text(
             node.title,
             color = if (focused) Color.White else TextDim,
-            fontSize = 15.sp,
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
             fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Normal,
+            minLines = 2,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
@@ -230,32 +241,62 @@ fun PagedGrid(
         }
     }
 
+    val tv = LocalIsTv.current
+    val wide = isWideLayout()
     Column(Modifier.fillMaxSize()) {
         if (title != null) {
             Text(
                 title,
-                fontSize = 28.sp,
+                fontSize = if (tv) 24.sp else if (wide) 24.sp else 20.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 40.dp, top = 28.dp, end = 40.dp),
+                modifier = Modifier.padding(
+                    start = if (wide) 36.dp else 16.dp,
+                    top = if (wide) 20.dp else 12.dp,
+                    end = 16.dp,
+                ),
             )
         }
         if (nodes.isEmpty()) {
             MessagePane(emptyText)
-        } else {
+        } else BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+            val hPad = if (wide) 36.dp else 12.dp
+            val vPad = if (tv) 14.dp else 12.dp
+            val hGap = if (tv) 20.dp else 12.dp
+            val vGap = if (tv) 18.dp else 16.dp
+            val columns: GridCells
+            val cardWidth: Dp?
+            if (tv) {
+                // Ровно 4 фильма в ряд и 2 ряда на экране: размер постера считается от высоты области.
+                val labelH = 46.dp
+                val rowH = (maxHeight - vPad * 2 - vGap) / 2
+                val byHeight = (rowH - labelH) / 1.5f
+                val byWidth = (maxWidth - hPad * 2 - hGap * 3) / 4
+                cardWidth = minOf(byHeight, byWidth)
+                columns = GridCells.Fixed(4)
+            } else {
+                cardWidth = null
+                columns = GridCells.Adaptive(if (wide) 132.dp else 104.dp)
+            }
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(150.dp),
-                contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = 24.dp, bottom = 48.dp),
-                horizontalArrangement = Arrangement.spacedBy(22.dp),
-                verticalArrangement = Arrangement.spacedBy(26.dp),
+                columns = columns,
+                contentPadding = PaddingValues(start = hPad, end = hPad, top = vPad, bottom = vPad + if (tv) 0.dp else 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(hGap),
+                verticalArrangement = Arrangement.spacedBy(vGap),
                 modifier = Modifier.fillMaxSize(),
             ) {
                 itemsIndexed(nodes, key = { i, n -> "$i|${n.key}" }) { i, node ->
                     if (i >= nodes.size - 10) LaunchedEffect(nodes.size) { loadMore() }
-                    val mod = if (i == 0 && autoFocus) Modifier.focusRequester(firstFocus) else Modifier
-                    PosterCard(node, onClick = { onOpen(node) }, modifier = mod.width(150.dp))
-                    if (i == 0 && autoFocus) LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
+                    val focusMod = if (i == 0 && autoFocus && tv) Modifier.focusRequester(firstFocus) else Modifier
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                        PosterCard(
+                            node,
+                            onClick = { onOpen(node) },
+                            modifier = focusMod.then(if (cardWidth != null) Modifier.width(cardWidth) else Modifier.fillMaxWidth()),
+                        )
+                    }
+                    if (i == 0 && autoFocus && tv) LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
                 }
             }
         }
