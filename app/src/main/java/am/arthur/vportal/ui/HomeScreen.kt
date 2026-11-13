@@ -118,7 +118,7 @@ fun HomeScreen(
             }
             add(Section("Продолжить", Icons.Filled.PlayArrow, Kind.CONTINUE))
             add(Section("Избранное", Icons.Filled.Favorite, Kind.FAVORITES))
-            add(Section("Сменить портал", Icons.Filled.Refresh, Kind.PORTAL))
+            add(Section("Сменить код", Icons.Filled.Refresh, Kind.PORTAL))
             add(Section("Диагностика", Icons.Filled.Settings, Kind.DIAG))
         }
     }
@@ -176,10 +176,7 @@ private fun Rail(sections: List<Section>, selected: Int, onClick: (Int) -> Unit)
     Column(
         Modifier.width(250.dp).fillMaxHeight().background(Panel).padding(top = 28.dp)
     ) {
-        Row(Modifier.padding(start = 28.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("V", color = Accent, fontSize = 30.sp, fontWeight = FontWeight.Black)
-            Text("Portal", fontSize = 26.sp, fontWeight = FontWeight.Bold)
-        }
+        AppTitle(iconSize = 40, fontSize = 21, modifier = Modifier.padding(start = 20.dp, bottom = 20.dp))
         LazyColumn(
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),

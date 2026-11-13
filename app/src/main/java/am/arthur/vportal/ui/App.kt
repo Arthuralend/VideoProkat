@@ -45,7 +45,6 @@ fun VPortalApp(storage: Storage) {
 
     if (client == null) {
         ConnectScreen(
-            initial = storage.lastPortal ?: PortalConfig.DEFAULT,
             onConnect = { input ->
                 val value = PortalConfig.normalize(input)
                 storage.resetProto()

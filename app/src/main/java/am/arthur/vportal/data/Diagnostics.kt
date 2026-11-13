@@ -19,16 +19,16 @@ object Diagnostics {
 
         out += Result(
             "Медиатека",
-            "Адрес API: ${portal.baseUrl}\nКлюч: ${portal.key?.let { "есть (${it.length} симв.)" } ?: "нет"}\n" +
+            "Ключ: ${portal.key?.let { "есть" } ?: "нет"}\n" +
                 "Запомненный формат: ${storage.proto ?: "—"}${if (storage.protoOk) " (подтверждён)" else ""}\n" +
-                "VPortal ${am.arthur.vportal.BuildConfig.VERSION_NAME}"
+                "ВидеоПрокат ${am.arthur.vportal.BuildConfig.VERSION_NAME}"
         )
 
         out += try {
             val ips = InetAddress.getAllByName(host).joinToString { it.hostAddress ?: "?" }
-            Result("DNS — OK", "$host → $ips")
+            Result("DNS — OK", "адрес сервера найден (${ips.split(",").size} IP)")
         } catch (e: Exception) {
-            Result("DNS — ошибка", "$host не находится: ${e.message}\nВозможно, адрес доступен только через VPN или у провайдера.")
+            Result("DNS — ошибка", "адрес сервера не находится.\nВозможно, он доступен только через VPN или у провайдера.")
         }
 
         for (p in PortalClient.PROTOS) {
@@ -57,7 +57,7 @@ object Diagnostics {
                 Result("GET (для сравнения) — HTTP ${r.code}", client.mask(r.body?.string().orEmpty().take(400)))
             }
         } catch (e: Exception) {
-            Result("GET (для сравнения) — ошибка", "${e.javaClass.simpleName}: ${e.message}")
+            Result("GET (для сравнения) — ошибка", "${e.javaClass.simpleName}: ${client.mask(e.message ?: "")}")
         }
         out
     }

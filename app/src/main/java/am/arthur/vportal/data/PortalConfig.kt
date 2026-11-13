@@ -4,16 +4,21 @@ package am.arthur.vportal.data
 data class Portal(val baseUrl: String, val key: String?, val raw: String)
 
 object PortalConfig {
-    /** Строка подключения по умолчанию — уже подставлена в поле ввода. */
-    const val DEFAULT =
+    /** Код подключения: набираешь его — и приложение подключается к встроенной медиатеке. */
+    const val SHORT_CODE = "22184"
+
+    /** Встроенная строка подключения. Пользователю нигде не показывается. */
+    private const val BUILTIN =
         "portal::[key:9ff494ce340dfd6-57308e9eb1ec747]http://2e1f56aeefe2.jmeekos.com/api/v1/"
 
     private val PORTAL_RE =
         Regex("""^portal::(?:\[|%5b)key:([^\]]*?)(?:]|%5d)\s*(https?://\S+)$""", RegexOption.IGNORE_CASE)
 
-    /** Убирает пробелы и кавычки вокруг вставленной строки. */
-    fun normalize(input: String): String =
-        input.trim().trim('"', '\'', '«', '»', '“', '”', '„', '`').trim()
+    /** Код → встроенная строка; иначе убирает пробелы и кавычки вокруг. */
+    fun normalize(input: String): String {
+        val s = input.trim().trim('"', '\'', '«', '»', '“', '”', '„', '`').trim()
+        return if (s == SHORT_CODE) BUILTIN else s
+    }
 
     fun parse(input: String): Portal? {
         val s = normalize(input)

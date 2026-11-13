@@ -112,9 +112,9 @@ class PortalClient(val portal: Portal, private val storage: Storage) {
                 storage.protoOk = true
                 return@withContext j
             } catch (e: UnknownHostException) {
-                throw IOException("Сервер медиатеки не найден ($host). Проверьте интернет или VPN.")
+                throw IOException("Сервер медиатеки не найден. Проверьте интернет или VPN.")
             } catch (e: ConnectException) {
-                throw IOException("Нет соединения с сервером медиатеки ($host).")
+                throw IOException("Нет соединения с сервером медиатеки.")
             } catch (e: SocketTimeoutException) {
                 throw IOException("Сервер медиатеки не отвечает (истекло время ожидания).")
             } catch (e: Exception) {
@@ -124,7 +124,13 @@ class PortalClient(val portal: Portal, private val storage: Storage) {
         throw firstError ?: IOException("Нет ответа от портала")
     }
 
-    fun mask(s: String): String = portal.key?.let { s.replace(it, "***") } ?: s
+    /** Скрывает ключ и адрес медиатеки в текстах, которые видит пользователь. */
+    fun mask(s: String): String {
+        var r = s
+        portal.key?.let { r = r.replace(it, "***") }
+        r = r.replace(portal.baseUrl, "•••").replace(host, "•••")
+        return r
+    }
 
     private fun snippet(t: String) = t.replace(Regex("""\s+"""), " ").trim().take(200).ifEmpty { "(пустой ответ)" }
 
