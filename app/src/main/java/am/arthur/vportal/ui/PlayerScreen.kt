@@ -33,6 +33,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
@@ -85,7 +86,16 @@ fun PlayerScreen(client: PortalClient, storage: Storage, node: Node, url: String
 
     val player = remember(node) {
         val dataSource = OkHttpDataSource.Factory(client.http).setUserAgent(PortalClient.USER_AGENT)
+        // Буфер ограничен ~30 с и 24 МБ: по умолчанию ExoPlayer держит до ~128 МБ видео в памяти,
+        // а на ТВ-приставках приложению дают всего 128–256 МБ — отсюда OutOfMemoryError посреди фильма.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15_000, 30_000, 2_500, 5_000)
+            .setTargetBufferBytes(24 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .setBackBuffer(0, false)
+            .build()
         ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(10_000)
@@ -93,13 +103,22 @@ fun PlayerScreen(client: PortalClient, storage: Storage, node: Node, url: String
     }
 
     DisposableEffect(player) {
+        var retries = 0
         val listener = object : Player.Listener {
             override fun onPlayerError(e: PlaybackException) {
+                // Сбой сети или памяти — тихо переподключаемся с того же места (до 5 раз подряд).
+                if (retries < 5) {
+                    retries++
+                    System.gc()
+                    player.prepare()
+                    player.playWhenReady = true
+                    return
+                }
                 error = "Не удалось воспроизвести: ${e.errorCodeName}\n${e.cause?.message ?: e.message ?: ""}"
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) error = null
+                if (isPlaying) { error = null; retries = 0 }
             }
         }
         player.addListener(listener)
