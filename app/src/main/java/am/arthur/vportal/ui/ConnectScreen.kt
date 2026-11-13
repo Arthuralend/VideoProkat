@@ -91,7 +91,9 @@ fun ConnectScreen(
 
     val compact = LocalConfiguration.current.screenWidthDp < 600
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(if (compact) 20.dp else 48.dp),
+        Modifier.fillMaxSize()
+            .then(if (compact) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+            .padding(if (compact) 20.dp else 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
