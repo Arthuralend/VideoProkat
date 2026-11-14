@@ -1,6 +1,8 @@
 package am.arthur.vportal.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
+import am.arthur.vportal.BuildConfig
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -9,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -147,9 +151,9 @@ fun HomeScreen(
                     key(sel, s.title) {
                         when (s.kind) {
                             Kind.SEARCH -> SearchPane(client, onOpen)
-                            Kind.ROOT -> PagedGrid(client, r.value.page, onOpen, title = "Главная")
+                            Kind.ROOT -> PagedGrid(client, r.value.page, onOpen, title = "Главная", memoryKey = "root")
                             Kind.FOLDER -> NodeGrid(client, client.listRequest(s.node!!), null, onOpen, title = s.title)
-                            Kind.FILTER -> PagedGrid(client, Page(null, s.items), onOpen, title = s.title)
+                            Kind.FILTER -> PagedGrid(client, Page(null, s.items), onOpen, title = s.title, memoryKey = "filter:${s.title}")
                             Kind.CONTINUE -> PagedGrid(
                                 client, Page(null, remember { storage.continueNodes() }), onOpen,
                                 title = "Продолжить просмотр",
@@ -173,21 +177,133 @@ fun HomeScreen(
             Box(Modifier.weight(1f).fillMaxHeight()) { content() }
         }
     } else {
-        // Телефон вертикально: название сверху, разделы — прокручиваемые вкладки.
-        Column(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxWidth().background(Panel).padding(top = 10.dp, bottom = 8.dp)) {
-                AppTitle(iconSize = 32, fontSize = 20, modifier = Modifier.padding(start = 14.dp, bottom = 8.dp))
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    itemsIndexed(sections, key = { i, s -> "$i|${s.title}" }) { i, s ->
-                        TabChip(s.title, s.icon, i == sel) { onPick(i) }
+        PhoneHome(sections, sel, onSelect, defaultIndex, onChangePortal, onDiagnostics, content)
+    }
+}
+
+private val catalogKinds = setOf(Kind.ROOT, Kind.FOLDER, Kind.FILTER)
+
+/**
+ * Телефон вертикально: сверху логотип и разделы каталога (прокручиваемые вкладки),
+ * снизу — панель под большой палец: Каталог · Поиск · Продолжить · Избранное · Ещё.
+ */
+@Composable
+private fun PhoneHome(
+    sections: List<Section>,
+    sel: Int,
+    onSelect: (Int) -> Unit,
+    defaultIndex: Int,
+    onChangePortal: () -> Unit,
+    onDiagnostics: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    var more by remember { mutableStateOf(false) }
+    var lastCatalog by remember { mutableIntStateOf(defaultIndex) }
+    val selKind = sections[sel].kind
+    LaunchedEffect(sel) { if (sections[sel].kind in catalogKinds) lastCatalog = sel }
+    val catalog = sections.withIndex().filter { it.value.kind in catalogKinds }
+
+    // «Назад» на телефоне сначала возвращает в каталог и только потом закрывает приложение.
+    BackHandler(enabled = more || sel != defaultIndex) {
+        if (more) more = false else onSelect(defaultIndex)
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        if (!more && selKind in catalogKinds) {
+            Column(Modifier.fillMaxWidth().background(Panel).padding(top = 10.dp, bottom = 10.dp)) {
+                AppTitle(iconSize = 30, fontSize = 20, modifier = Modifier.padding(start = 16.dp, bottom = 10.dp))
+                if (catalog.size > 1) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        itemsIndexed(catalog, key = { _, e -> "${e.index}|${e.value.title}" }) { _, item ->
+                            TabChip(item.value.title, item.value.icon, item.index == sel) { onSelect(item.index) }
+                        }
                     }
                 }
             }
-            Box(Modifier.fillMaxWidth().weight(1f)) { content() }
         }
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            if (more) MorePane(onChangePortal, onDiagnostics) else content()
+        }
+        val searchIdx = sections.indexOfFirst { it.kind == Kind.SEARCH }
+        val contIdx = sections.indexOfFirst { it.kind == Kind.CONTINUE }
+        val favIdx = sections.indexOfFirst { it.kind == Kind.FAVORITES }
+        Row(
+            Modifier.fillMaxWidth().background(Panel).height(64.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BottomTab("Каталог", Icons.Filled.Home, !more && selKind in catalogKinds) {
+                more = false; onSelect(lastCatalog)
+            }
+            if (searchIdx >= 0) BottomTab("Поиск", Icons.Filled.Search, !more && sel == searchIdx) {
+                more = false; onSelect(searchIdx)
+            }
+            BottomTab("Смотрю", Icons.Filled.PlayArrow, !more && sel == contIdx) {
+                more = false; onSelect(contIdx)
+            }
+            BottomTab("Избранное", Icons.Filled.Favorite, !more && sel == favIdx) {
+                more = false; onSelect(favIdx)
+            }
+            BottomTab("Ещё", Icons.Filled.MoreVert, more) { more = true }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.BottomTab(title: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
+    val fg = if (selected) Accent else TextDim
+    Column(
+        Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = touchIndication()) { onClick() },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(50))
+                .background(if (selected) Accent.copy(alpha = 0.18f) else Color.Transparent)
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+        ) {
+            Icon(icon, contentDescription = title, tint = fg, modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.height(3.dp))
+        Text(
+            title, color = fg, fontSize = 12.sp, maxLines = 1,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
+private fun MorePane(onChangePortal: () -> Unit, onDiagnostics: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        AppTitle(iconSize = 44, fontSize = 24, modifier = Modifier.padding(top = 8.dp, bottom = 24.dp))
+        MoreItem("Сменить код подключения", Icons.Filled.Refresh, onChangePortal)
+        Spacer(Modifier.height(10.dp))
+        MoreItem("Диагностика связи", Icons.Filled.Settings, onDiagnostics)
+        Spacer(Modifier.weight(1f))
+        Text("Версия ${BuildConfig.VERSION_NAME}", color = TextDim, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun MoreItem(title: String, icon: ImageVector, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(CardBg)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = touchIndication()) { onClick() }
+            .padding(horizontal = 18.dp, vertical = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -198,7 +314,7 @@ private fun TabChip(title: String, icon: ImageVector, selected: Boolean, onClick
             .clip(RoundedCornerShape(50))
             .background(if (selected) Accent else CardBg)
             .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val fg = if (selected) Color.Black else Color.White
@@ -270,7 +386,7 @@ private fun RailItem(
             .clip(RoundedCornerShape(12.dp))
             .background(bg)
             .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClick() }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = touchIndication()) { onClick() }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -284,33 +400,58 @@ private fun RailItem(
     }
 }
 
+/** Последний поиск — сохраняется, пока открыта карточка найденного фильма. */
+private object SearchMemory {
+    var query = ""
+    var result: Load<Page>? = null
+}
+
 @Composable
 fun SearchPane(client: PortalClient, onOpen: (Node) -> Unit) {
-    var query by remember { mutableStateOf("") }
-    var result by remember { mutableStateOf<Load<Page>?>(null) }
+    var query by remember { mutableStateOf(SearchMemory.query) }
+    var result by remember { mutableStateOf(SearchMemory.result) }
     var request by remember { mutableIntStateOf(0) }
+    val tv = LocalIsTv.current
+    val fieldFocus = remember { FocusRequester() }
 
     LaunchedEffect(request) {
         if (request > 0 && query.isNotBlank()) {
             result = Load.Loading
-            result = load { client.search(query.trim()) }
+            val r = load { client.search(query.trim()) }
+            result = r
+            SearchMemory.query = query
+            SearchMemory.result = r
         }
     }
+    // На телефоне ищем сразу по мере ввода — без кнопки «Найти» на клавиатуре.
+    LaunchedEffect(query) {
+        if (!tv && query.trim().length >= 3 && query != SearchMemory.query) {
+            delay(700)
+            request++
+        }
+    }
+    LaunchedEffect(Unit) { if (!tv && result == null) runCatching { fieldFocus.requestFocus() } }
 
     val pad = if (isWideLayout()) 36.dp else 16.dp
     Column(Modifier.fillMaxSize()) {
         Text(
-            "Поиск", fontSize = 24.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = pad, top = 20.dp),
+            "Поиск", fontSize = if (tv) 24.sp else 22.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = pad, top = if (tv) 20.dp else 14.dp),
         )
         Spacer(Modifier.height(12.dp))
-        SearchField(query, { query = it }, onSearch = { request++ }, modifier = Modifier.padding(horizontal = pad))
+        SearchField(
+            query, { query = it }, onSearch = { request++ },
+            onClear = { query = ""; result = null; SearchMemory.query = ""; SearchMemory.result = null },
+            modifier = Modifier.padding(horizontal = pad).focusRequester(fieldFocus),
+        )
         Spacer(Modifier.height(8.dp))
         when (val r = result) {
             null -> MessagePane("Введите название фильма, сериала или мультфильма")
             Load.Loading -> Loader()
             is Load.Err -> MessagePane(r.message)
-            is Load.Ok -> key(r) { PagedGrid(client, r.value, onOpen, emptyText = "Ничего не найдено") }
+            is Load.Ok -> key(r) {
+                PagedGrid(client, r.value, onOpen, emptyText = "Ничего не найдено", memoryKey = "search:${SearchMemory.query}")
+            }
         }
     }
 }

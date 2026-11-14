@@ -1,6 +1,11 @@
 package am.arthur.vportal.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -57,7 +62,9 @@ fun VPortalApp(storage: Storage) {
     }
 
     val current = stack.lastOrNull()
-    BackHandler(enabled = current != null) { stack.removeAt(stack.lastIndex) }
+    val back: () -> Unit = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
+    BackHandler(enabled = current != null) { back() }
+    val touch = !LocalIsTv.current
 
     when (current) {
         null -> HomeScreen(
@@ -73,18 +80,29 @@ fun VPortalApp(storage: Storage) {
             onDiagnostics = { diagnostics = client.portal.raw },
         )
         is Screen.Browse -> key(current) {
-            NodeGrid(
-                client, client.listRequest(current.node), null, open,
-                title = current.node.title, autoFocus = true,
-            )
+            if (touch) {
+                // Телефон: заголовок с кнопкой «Назад» сверху.
+                Column(Modifier.fillMaxSize()) {
+                    PhoneTopBar(current.node.title, back)
+                    Box(Modifier.fillMaxWidth().weight(1f)) {
+                        NodeGrid(client, client.listRequest(current.node), null, open, title = "")
+                    }
+                }
+            } else {
+                NodeGrid(
+                    client, client.listRequest(current.node), null, open,
+                    title = current.node.title, autoFocus = true,
+                )
+            }
         }
         is Screen.Details -> key(current) {
             DetailsScreen(
                 client, storage, current.node,
                 onPlay = { n, u -> stack.add(Screen.Player(n, u)) },
                 onOpen = open,
+                onBack = back,
             )
         }
-        is Screen.Player -> key(current) { PlayerScreen(client, storage, current.node, current.url) }
+        is Screen.Player -> key(current) { PlayerScreen(client, storage, current.node, current.url, onBack = back) }
     }
 }

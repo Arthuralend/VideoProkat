@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.List
@@ -33,6 +34,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -86,7 +88,7 @@ fun TvButton(
             .clip(RoundedCornerShape(12.dp))
             .background(bg)
             .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClick() }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = touchIndication()) { onClick() }
             .padding(horizontal = 22.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -157,7 +159,7 @@ fun PosterCard(node: Node, onClick: () -> Unit, modifier: Modifier = Modifier) {
                 .background(CardBg)
                 .then(if (focused) Modifier.border(3.dp, Accent, RoundedCornerShape(12.dp)) else Modifier)
                 .onFocusChanged { focused = it.isFocused }
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClick() },
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = touchIndication()) { onClick() },
             contentAlignment = Alignment.Center,
         ) {
             PosterContent(node)
@@ -165,8 +167,8 @@ fun PosterCard(node: Node, onClick: () -> Unit, modifier: Modifier = Modifier) {
         Spacer(Modifier.height(8.dp))
         Text(
             node.title,
-            color = if (focused) Color.White else TextDim,
-            fontSize = 14.sp,
+            color = if (focused || !LocalIsTv.current) Color(0xFFE6E8EC) else TextDim,
+            fontSize = if (LocalIsTv.current) 14.sp else 13.sp,
             lineHeight = 18.sp,
             fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Normal,
             minLines = 2,
@@ -207,6 +209,17 @@ fun PosterContent(node: Node) {
     }
 }
 
+/** Подгруженные страницы и место прокрутки списков: после возврата из карточки фильма список не начинается заново. */
+private class SavedGrid(val nodes: List<Node>, val next: String?, val index: Int, val offset: Int)
+
+private object GridMemory {
+    private val map = object : LinkedHashMap<String, SavedGrid>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SavedGrid>?) = size > 24
+    }
+    fun get(key: String): SavedGrid? = synchronized(map) { map[key] }
+    fun put(key: String, value: SavedGrid) = synchronized(map) { map[key] = value }
+}
+
 /** Сетка постеров с автоподгрузкой следующих страниц. */
 @Composable
 fun PagedGrid(
@@ -216,9 +229,23 @@ fun PagedGrid(
     title: String? = null,
     autoFocus: Boolean = false,
     emptyText: String = "Здесь пока пусто",
+    memoryKey: String? = null,
 ) {
-    val nodes = remember(page) { mutableStateListOf<Node>().apply { addAll(page.nodes) } }
-    var next by remember(page) { mutableStateOf(page.nextRequest) }
+    val saved = remember(page, memoryKey) { memoryKey?.let { GridMemory.get(it) } }
+    val nodes = remember(page) { mutableStateListOf<Node>().apply { addAll(saved?.nodes ?: page.nodes) } }
+    var next by remember(page) { mutableStateOf(if (saved != null) saved.next else page.nextRequest) }
+    val gridState = rememberLazyGridState(saved?.index ?: 0, saved?.offset ?: 0)
+    val focusIndex = saved?.index ?: 0
+    DisposableEffect(page, memoryKey) {
+        onDispose {
+            if (memoryKey != null && nodes.isNotEmpty()) {
+                GridMemory.put(
+                    memoryKey,
+                    SavedGrid(nodes.toList(), next, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset),
+                )
+            }
+        }
+    }
     var loadingMore by remember(page) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val firstFocus = remember { FocusRequester() }
@@ -244,7 +271,7 @@ fun PagedGrid(
     val tv = LocalIsTv.current
     val wide = isWideLayout()
     Column(Modifier.fillMaxSize()) {
-        if (title != null) {
+        if (!title.isNullOrBlank()) {
             Text(
                 title,
                 fontSize = if (tv) 24.sp else if (wide) 24.sp else 20.sp,
@@ -263,8 +290,8 @@ fun PagedGrid(
         } else BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
             val hPad = if (wide) 36.dp else 12.dp
             val vPad = if (tv) 14.dp else 12.dp
-            val hGap = if (tv) 20.dp else 12.dp
-            val vGap = if (tv) 18.dp else 16.dp
+            val hGap = if (tv) 20.dp else if (wide) 12.dp else 10.dp
+            val vGap = if (tv) 18.dp else 14.dp
             val columns: GridCells
             val cardWidth: Dp?
             if (tv) {
@@ -277,18 +304,21 @@ fun PagedGrid(
                 columns = GridCells.Fixed(4)
             } else {
                 cardWidth = null
-                columns = GridCells.Adaptive(if (wide) 132.dp else 104.dp)
+                // Телефон вертикально: 3 постера в ряд (4 — на широких телефонах), крупно и ровно под палец.
+                columns = if (wide) GridCells.Adaptive(132.dp)
+                else GridCells.Fixed(if (maxWidth >= 480.dp) 4 else 3)
             }
             LazyVerticalGrid(
                 columns = columns,
                 contentPadding = PaddingValues(start = hPad, end = hPad, top = vPad, bottom = vPad + if (tv) 0.dp else 24.dp),
                 horizontalArrangement = Arrangement.spacedBy(hGap),
                 verticalArrangement = Arrangement.spacedBy(vGap),
+                state = gridState,
                 modifier = Modifier.fillMaxSize(),
             ) {
                 itemsIndexed(nodes, key = { i, n -> "$i|${n.key}" }) { i, node ->
                     if (i >= nodes.size - 10) LaunchedEffect(nodes.size) { loadMore() }
-                    val focusMod = if (i == 0 && autoFocus && tv) Modifier.focusRequester(firstFocus) else Modifier
+                    val focusMod = if (i == focusIndex && autoFocus && tv) Modifier.focusRequester(firstFocus) else Modifier
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                         PosterCard(
                             node,
@@ -296,7 +326,7 @@ fun PagedGrid(
                             modifier = focusMod.then(if (cardWidth != null) Modifier.width(cardWidth) else Modifier.fillMaxWidth()),
                         )
                     }
-                    if (i == 0 && autoFocus && tv) LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
+                    if (i == focusIndex && autoFocus && tv) LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
                 }
             }
         }
@@ -327,6 +357,9 @@ fun NodeGrid(
     when (val s = state) {
         Load.Loading -> Loader()
         is Load.Err -> ErrorPane(s.message, onRetry = { state = Load.Loading; attempt++ })
-        is Load.Ok -> PagedGrid(client, s.value, onOpen, title = title ?: s.value.title, autoFocus = autoFocus)
+        is Load.Ok -> PagedGrid(
+            client, s.value, onOpen, title = title ?: s.value.title, autoFocus = autoFocus,
+            memoryKey = request?.let { "req:$it" },
+        )
     }
 }

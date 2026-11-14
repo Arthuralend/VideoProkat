@@ -26,3 +26,22 @@ fun isWideLayout(): Boolean {
     val c = LocalConfiguration.current
     return c.screenWidthDp > c.screenHeightDp && c.screenWidthDp >= 600
 }
+
+/** Телефон в вертикальном положении (нижняя панель вкладок, крупные кнопки под палец). */
+@Composable
+fun isPhonePortrait(): Boolean = !LocalIsTv.current && !isWideLayout()
+
+/** Подсветка нажатия: на телефоне — «волна» под пальцем, на ТВ её заменяет рамка фокуса. */
+@Composable
+fun touchIndication(): androidx.compose.foundation.Indication? =
+    if (LocalIsTv.current) null else androidx.compose.foundation.LocalIndication.current
+
+/** Ищет Activity за контекстом Compose (нужно плееру: ориентация, яркость, системные панели). */
+fun Context.findActivity(): android.app.Activity? {
+    var c: Context? = this
+    while (c is android.content.ContextWrapper) {
+        if (c is android.app.Activity) return c
+        c = c.baseContext
+    }
+    return null
+}

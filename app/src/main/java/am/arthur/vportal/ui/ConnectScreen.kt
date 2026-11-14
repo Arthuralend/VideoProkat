@@ -131,12 +131,20 @@ fun ConnectScreen(
             Text(error!!, color = ErrorRed, fontSize = 15.sp)
         }
         Spacer(Modifier.height(24.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TvButton("Подключить", ::submit, icon = Icons.Filled.PlayArrow, primary = true)
-            TvButton("Диагностика", {
-                if (PortalConfig.parse(text) != null) onDiagnostics(text)
-                else error = "Сначала введите код"
-            }, icon = Icons.Filled.Info)
+        val diag: () -> Unit = {
+            if (PortalConfig.parse(text) != null) onDiagnostics(text)
+            else error = "Сначала введите код"
+        }
+        if (compact && !LocalIsTv.current) {
+            Column(Modifier.widthIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                BigButton("Подключить", Icons.Filled.PlayArrow, primary = true, onClick = ::submit)
+                BigButton("Диагностика", Icons.Filled.Info, onClick = diag)
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TvButton("Подключить", ::submit, icon = Icons.Filled.PlayArrow, primary = true)
+                TvButton("Диагностика", diag, icon = Icons.Filled.Info)
+            }
         }
     }
 }
