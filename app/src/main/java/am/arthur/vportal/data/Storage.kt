@@ -30,6 +30,13 @@ class Storage(context: Context) {
         p.edit().remove("proto").remove("protoOk").apply()
     }
 
+    /** Видео на телефоне растянуто во весь экран (без рамок, с сохранением пропорций). */
+    var videoZoom: Boolean
+        get() = p.getBoolean("videoZoom", false)
+        set(v) {
+            p.edit().putBoolean("videoZoom", v).apply()
+        }
+
     fun position(key: String): Long = p.getLong("pos:$key", 0L)
 
     fun resetPosition(key: String) {

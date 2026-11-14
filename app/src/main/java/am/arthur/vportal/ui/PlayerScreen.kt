@@ -2,6 +2,11 @@ package am.arthur.vportal.ui
 
 import android.content.Context
 import android.content.pm.ActivityInfo
+import android.os.Build
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.media3.ui.AspectRatioFrameLayout
 import android.media.AudioManager
 import android.provider.Settings
 import android.view.GestureDetector
@@ -69,13 +74,21 @@ import am.arthur.vportal.data.Storage
 /**
  * PlayerView для ТВ и телефона.
  * Пульт: ← / → — перемотка на 10 с, OK — пауза.
- * Палец (touchGestures): тап — показать/скрыть панель, двойной тап слева/справа — ∓10 с, в центре — пауза;
+ * Палец (touchGestures): тап — показать/скрыть панель, двойной тап — во весь экран / с рамками;
  * свайп по горизонтали — перемотка, по вертикали справа — громкость, слева — яркость.
  */
 @OptIn(UnstableApi::class)
 class TvPlayerView(context: Context) : PlayerView(context) {
     var touchGestures = false
     var onHint: ((String?) -> Unit)? = null
+    var onZoomChanged: ((Boolean) -> Unit)? = null
+
+    /** true — кадр заполняет весь экран без рамок (лишнее по краям обрезается, пропорции сохраняются). */
+    var zoom: Boolean = false
+        set(v) {
+            field = v
+            resizeMode = if (v) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
 
     private enum class Mode { NONE, SEEK, VOLUME, BRIGHTNESS, IGNORE }
 
@@ -105,15 +118,9 @@ class TvPlayerView(context: Context) : PlayerView(context) {
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            val p = player ?: return true
-            val third = width / 3f
-            when {
-                e.x < third -> { p.seekBack(); hint("« 10 с", 700) }
-                e.x > third * 2 -> { p.seekForward(); hint("10 с »", 700) }
-                else -> {
-                    if (p.isPlaying) { p.pause(); hint("Пауза", 700) } else { p.play(); hint("Воспроизведение", 700) }
-                }
-            }
+            zoom = !zoom
+            onZoomChanged?.invoke(zoom)
+            hint(if (zoom) "Во весь экран" else "Целиком, с рамками", 900)
             return true
         }
     })
@@ -223,15 +230,32 @@ fun PlayerScreen(client: PortalClient, storage: Storage, node: Node, url: String
     var controlsVisible by remember { mutableStateOf(true) }
     var hint by remember { mutableStateOf<String?>(null) }
 
-    // Телефон: кино — во весь экран, горизонтально, без строки состояния и кнопок навигации.
+    // Телефон: кино — во весь экран, горизонтально, без строки состояния и кнопок навигации,
+    // включая зону выреза камеры (иначе по бокам остаются чёрные полосы).
     if (!tv) {
         DisposableEffect(activity) {
             val window = activity?.window
+            if (window != null) {
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                if (Build.VERSION.SDK_INT >= 28) {
+                    window.attributes = window.attributes.apply {
+                        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                    }
+                }
+            }
             val bars = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
             bars?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             bars?.hide(WindowInsetsCompat.Type.systemBars())
             onDispose {
                 bars?.show(WindowInsetsCompat.Type.systemBars())
+                if (window != null) {
+                    WindowCompat.setDecorFitsSystemWindows(window, true)
+                    if (Build.VERSION.SDK_INT >= 28) {
+                        window.attributes = window.attributes.apply {
+                            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+                        }
+                    }
+                }
                 activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 window?.let { w ->
                     w.attributes = w.attributes.apply {
@@ -339,6 +363,10 @@ fun PlayerScreen(client: PortalClient, storage: Storage, node: Node, url: String
                     controllerShowTimeoutMs = if (tv) 3500 else 3000
                     touchGestures = !tv
                     onHint = { hint = it }
+                    if (!tv) {
+                        zoom = storage.videoZoom
+                        onZoomChanged = { storage.videoZoom = it }
+                    }
                     setControllerVisibilityListener(
                         PlayerView.ControllerVisibilityListener { v -> controlsVisible = v == View.VISIBLE }
                     )
@@ -357,6 +385,7 @@ fun PlayerScreen(client: PortalClient, storage: Storage, node: Node, url: String
                 Modifier
                     .fillMaxWidth()
                     .background(Brush.verticalGradient(listOf(Color(0xAA000000), Color.Transparent)))
+                    .windowInsetsPadding(WindowInsets.displayCutout)
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
